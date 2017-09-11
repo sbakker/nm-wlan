@@ -1,0 +1,129 @@
+#!/bin/sh
+#
+#   99-wlan - toggle WiFi when wired connection goes up/down
+#
+#   Copyright (C) 2017  Steven Bakker
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Usage: 99-wlan IFACE ACTION
+#
+# IFACE  = wireless interface
+# ACTION = {up|down}
+#
+# Disable WiFi if a wired connection comes up.
+# Re-enable WiFi if the wired connection goes down again.
+#
+# Assumes there is one wired interface on the host, so typically
+# works for laptops only.
+#
+
+myname=$(basename "$0") || exit 1
+mydir=$(dirname "$0") || exit 1
+
+if [ $# -ne 2 ]; then
+    logger -p user.info -t "${myname}[$$]" \
+        "wrong number of arguments (need 2, got $#)"
+    exit 1
+fi
+
+IFACE=$1
+ACTION=$2
+shift 2
+
+log() { logger -p user.info -t "${myname}[$$]" "$IFACE/$ACTION: $*"; }
+
+log "script called with arguments: $IFACE $ACTION"
+
+DEBUG=false
+STATEDIR=/var/run/nm-wired
+mkdir -p $STATEDIR
+
+if $DEBUG; then
+    if [ -e "/sys/class/net/$IFACE/device" ]; then
+        log "/sys/class/net/$IFACE/device exists"
+    else
+        log "/sys/class/net/$IFACE/device does not exist"
+    fi
+
+    if [ -e "/sys/class/net/$IFACE/wireless" ]; then
+        log "/sys/class/net/$IFACE/wireless exists"
+    else
+        log "/sys/class/net/$IFACE/wireless does not exist"
+    fi
+fi
+
+get_wifi_con() {
+    nmcli -t device show "$1" 2>/dev/null \
+    | perl -n -E 'say $1 if /^GENERAL\.CONNECTION:(.*)$/'
+}
+
+case ${ACTION} in
+    up)
+        rm -rf $STATEDIR/$IFACE
+
+        # Don't do anything if this is not a physical device.
+        if [ ! -e "/sys/class/net/$IFACE/device" ]; then
+            log "$IFACE not a physical device -- ignoring"
+            exit 0
+        fi
+
+        # If this is a wireless device, check if we need
+        # to do anything special.
+        if [ -d "/sys/class/net/$IFACE/wireless" ]; then
+            log "$IFACE is a wireless device"
+
+            wifi_con=$(get_wifi_con "$IFACE")
+            script="${mydir}/wlan-up.d/$wifi_con"
+            dfl_script="${mydir}/wlan-up.d/default"
+            PATH=${mydir}/wlan-up.d/scripts:$PATH
+
+            if [ -n "$wifi_con" ] && [ -f "$script" ] && [ -x "$script" ]
+            then
+                log "$IFACE running $script"
+                $script "$IFACE" "$ACTION" "$wifi_con" || exit 1
+            elif [ -f "$dfl_script" ] && [ -x "$dfl_script" ]
+            then
+                log "$IFACE running $dfl_script"
+                $dfl_script "$IFACE" "$ACTION" "$wifi_con" || exit 1
+            fi
+            exit 0
+        fi
+
+        # Keep track of wired devices. When they go down, the
+        # device node may go as well (e.g. USB Ethernet dongle),
+        # so we'd have no way of telling what type the device was.
+        touch $STATEDIR/$IFACE
+
+        # Now shut down WiFi.
+        log "shutting down WiFi"
+        nmcli r wifi off
+        ;;
+    down)
+        # Check whether we previously recognised $IFACE as a
+        # physical, wired device.
+        if [ ! -e $STATEDIR/$IFACE ]; then
+            log "$IFACE not a wired device -- ignoring"
+            exit 0
+        fi
+
+        rm -rf $STATEDIR/$IFACE
+
+        # Instead of checking a single file, we could also check
+        # whether there are still files in $STATEDIR. If so, we
+        # still have a wired device enabled...
+        log "enabling WiFi"
+        nmcli r wifi on
+        ;;
+esac
