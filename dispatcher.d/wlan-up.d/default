@@ -25,9 +25,11 @@ shift 3
 
 myname=$(basename "$0") || exit 1
 
-log() { logger -p user.info -t "${myname}[$$]" "$IFACE/$ACTION/$CONN_NAME: $*"; }
+log() {
+    logger -p user.info -t "${myname}[$$]" "$IFACE/$ACTION/$CONN_NAME: $*"
+}
 
 log "nothing to do"
 
 # log "disable IPv6 on a broken network"
-# disable_ipv6.sh "$@"
+# disable_ipv6.sh "$IFACE" "$ACTION" "$CONN_NAME"
