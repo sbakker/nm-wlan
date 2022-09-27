@@ -40,17 +40,22 @@ fi
 
 IFACE=$1
 ACTION=$2
-shift 2
 
-log() { logger -p user.info -t "${myname}[$$]" "$IFACE/$ACTION: $*"; }
+log() {
+    if [ -n "$IFACE" ]; then
+        logger -p user.info -t "${myname}[$$]" "$IFACE/$ACTION: $*";
+    else
+        logger -p user.info -t "${myname}[$$]" "$ACTION: $*";
+    fi
+}
 
-log "script called with arguments: $IFACE $ACTION"
+log "script called with arguments: $@"
 
 DEBUG=false
 STATEDIR=/var/run/nm-wired
 mkdir -p $STATEDIR
 
-if $DEBUG; then
+if [ -n "$IFACE" ] && $DEBUG; then
     if [ -e "/sys/class/net/$IFACE/device" ]; then
         log "/sys/class/net/$IFACE/device exists"
     else
